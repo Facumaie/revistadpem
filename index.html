@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CONTROL DE REVISTA DPEM — División Armería y Logística</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root{
     --bg:#0f1620; --panel:#16202e; --panel2:#1c2838; --line:#26344a;
@@ -958,49 +959,168 @@ function importNomina(file){
   reader.readAsArrayBuffer(file);
 }
 
-function exportPadron(){
+/* ====================== EXPORTACIÓN EXCEL (ExcelJS) ======================
+   Cada export arma una "especificación" de datos (columnas + filas) y un
+   renderizador común aplica: título con formato, encabezados, bordes solo
+   en las filas con datos y sin cuadrícula en el resto. */
+
+const XLS_COLOR={ titulo:'FF1F3350', sub:'FF9A7A22', head:'FF34507A', headTxt:'FFFFFFFF',
+                  ink:'FF1A2230', zebra:'FFEFF3F8', linea:'FFB9C4D4' };
+function _thin(){ return {style:'thin',color:{argb:XLS_COLOR.linea}}; }
+function _bordeTodo(){ return {top:_thin(),left:_thin(),bottom:_thin(),right:_thin()}; }
+
+function renderSheet(wb, sheet){
+  const cols=sheet.columns, n=cols.length;
+  const ws=wb.addWorksheet(sheet.name, { views:[{showGridLines:false}] });
+  ws.columns=cols.map(c=>({width:c.width||16}));
+  // Fila 1: título
+  ws.mergeCells(1,1,1,n);
+  const t=ws.getCell(1,1);
+  t.value=sheet.title;
+  t.font={name:'Arial',size:13,bold:true,color:{argb:XLS_COLOR.headTxt}};
+  t.fill={type:'pattern',pattern:'solid',fgColor:{argb:XLS_COLOR.titulo}};
+  t.alignment={vertical:'middle',horizontal:'left',indent:1};
+  ws.getRow(1).height=26;
+  // Fila 2: subtítulo
+  ws.mergeCells(2,1,2,n);
+  const s=ws.getCell(2,1);
+  s.value=sheet.subtitle||'';
+  s.font={name:'Arial',size:9.5,bold:true,color:{argb:XLS_COLOR.sub}};
+  s.alignment={vertical:'middle',horizontal:'left',indent:1};
+  ws.getRow(2).height=16;
+  // Fila 3: espaciador (sin contenido, sin borde)
+  const HEAD=4;
+  // Encabezados
+  const hr=ws.getRow(HEAD);
+  cols.forEach((c,i)=>{
+    const cell=hr.getCell(i+1);
+    cell.value=c.header;
+    cell.font={name:'Arial',size:10,bold:true,color:{argb:XLS_COLOR.headTxt}};
+    cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:XLS_COLOR.head}};
+    cell.alignment={vertical:'middle',horizontal:'left',wrapText:true,indent:1};
+    cell.border=_bordeTodo();
+  });
+  hr.height=24;
+  // Filas de datos (bordes solo acá)
+  sheet.rows.forEach((row,ri)=>{
+    const r=ws.getRow(HEAD+1+ri);
+    cols.forEach((c,i)=>{
+      const cell=r.getCell(i+1);
+      let v=row[c.key]; if(v===undefined||v===null) v='';
+      cell.value=v;
+      cell.font={name:'Arial',size:10,color:{argb:XLS_COLOR.ink}};
+      cell.alignment={vertical:'middle',horizontal:c.align||'left',wrapText:true,indent:1};
+      cell.border=_bordeTodo();
+      if(ri%2===1) cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:XLS_COLOR.zebra}};
+    });
+  });
+  // Congelar encabezado y autofiltro
+  ws.views=[{showGridLines:false, state:'frozen', ySplit:HEAD}];
+  if(sheet.rows.length) ws.autoFilter={ from:{row:HEAD,column:1}, to:{row:HEAD,column:n} };
+  return ws;
+}
+
+async function writeWorkbook(spec){
+  if(typeof ExcelJS==='undefined'){ toast('No se pudo cargar ExcelJS','err'); return; }
+  const wb=new ExcelJS.Workbook();
+  wb.creator='Control de Revista DPEM';
+  spec.sheets.forEach(sh=>renderSheet(wb,sh));
+  const buf=await wb.xlsx.writeBuffer();
+  const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=spec.filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+
+/* -------- Especificaciones de datos por export -------- */
+function buildPadronData(){
   const efs=Object.values(state.efectivos).sort(cmpEfectivo);
-  const data=efs.map(e=>{
+  const columns=[
+    {header:'LP',key:'LP',width:9},{header:'JERARQUÍA',key:'JERARQUIA',width:16},
+    {header:'APELLIDO',key:'APELLIDO',width:20},{header:'NOMBRE',key:'NOMBRE',width:20},
+    {header:'DNI',key:'DNI',width:12},{header:'DESTINO',key:'DESTINO',width:34},
+    {header:'SIN CHALECO',key:'SIN_CH',width:11,align:'center'},
+    {header:'CHALECO MARCA',key:'CH_MAR',width:18},{header:'CHALECO MODELO',key:'CH_MOD',width:16},
+    {header:'CHALECO Nº SERIE',key:'CH_SER',width:16},{header:'CHALECO FABRIC.',key:'CH_FAB',width:14},
+    {header:'CHALECO ESTADO',key:'CH_EST',width:15},
+    {header:'ARMA MODELO',key:'AR_MOD',width:18},{header:'ARMA Nº SERIE',key:'AR_SER',width:15},
+    {header:'CARG.',key:'CARG',width:8,align:'center'},{header:'MUNIC.',key:'MUN',width:8,align:'center'},
+    {header:'ARMA LARGA',key:'AL',width:20},{header:'ARMA LARGA Nº SERIE',key:'AL_SER',width:16},
+    {header:'FUNDA',key:'FUNDA',width:12},{header:'ESPOSAS Nº SERIE',key:'ESP',width:15},
+    {header:'ÚLTIMO CONTROL',key:'UC',width:14,align:'center'},{header:'ÚLTIMO RESULTADO',key:'UR',width:15}
+  ];
+  const rows=efs.map(e=>{
     const c=e.chaleco||{},a=e.armaCorta||{},al=e.armaLarga||{},cs=chalecoEstado(e),uc=ultimoControl(e.lp);
     return {
-      LP:e.lp, JERARQUIA:e.jerarquia, APELLIDO:e.apellido, NOMBRE:e.nombre, DNI:e.dni, DESTINO:e.destino,
-      'SIN CHALECO':e.sinChaleco?'SI':'NO',
-      'CHALECO MARCA':c.fabricante, 'CHALECO MODELO':c.modelo, 'CHALECO Nº SERIE':c.nroSerie, 'CHALECO FABRICACION':c.fechaFab,
-      'CHALECO ESTADO':cs.label,
-      'ARMA MODELO':a.modelo, 'ARMA Nº SERIE':a.nroSerie, 'CARGADORES':a.cargadores, 'MUNICIONES':a.municiones,
-      'ARMA LARGA':[al.tipo,al.marca,al.modelo].filter(Boolean).join(' '), 'ARMA LARGA Nº SERIE':al.nroSerie,
-      'FUNDA':e.funda, 'ESPOSAS Nº SERIE':e.esposasNroSerie,
-      'ULTIMO CONTROL':uc?uc.fecha:'', 'ULTIMO RESULTADO':uc?uc.resultado:''
+      LP:e.lp,JERARQUIA:e.jerarquia,APELLIDO:e.apellido,NOMBRE:e.nombre,DNI:e.dni,DESTINO:(e.destino||'').replace(' (SOPE)',''),
+      SIN_CH:e.sinChaleco?'SI':'NO',
+      CH_MAR:e.sinChaleco?'NO POSEE':(c.fabricante||''),CH_MOD:e.sinChaleco?'':(c.modelo||''),CH_SER:e.sinChaleco?'':(c.nroSerie||''),CH_FAB:e.sinChaleco?'':(c.fechaFab||''),
+      CH_EST:cs.label,
+      AR_MOD:a.modelo||'',AR_SER:a.nroSerie||'',CARG:a.cargadores||'',MUN:a.municiones||'',
+      AL:[al.tipo,al.marca,al.modelo].filter(Boolean).join(' '),AL_SER:al.nroSerie||'',
+      FUNDA:e.funda||'',ESP:e.esposasNroSerie||'',
+      UC:uc?fmtFecha(uc.fecha):'',UR:uc?uc.resultado:''
     };
   });
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Padron');
-  XLSX.writeFile(wb,'padron_material_'+todayISO()+'.xlsx');
+  return { filename:'padron_material_'+todayISO()+'.xlsx',
+    sheets:[{name:'Padrón', title:'PADRÓN DE EFECTIVOS Y MATERIAL ASIGNADO',
+      subtitle:'División Armería y Logística · DPEM — '+fmtFecha(todayISO()), columns, rows}] };
 }
-function exportHistorial(){
+
+function buildHistorialData(){
   let list=[...state.controles].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
   if(histFilters.periodo) list=list.filter(c=>c.periodo===histFilters.periodo);
   if(histFilters.resultado) list=list.filter(c=>c.resultado===histFilters.resultado);
-  if(list.length===0){ toast('No hay controles para exportar','err'); return; }
-  const data=list.map(c=>{const s=c.snap||{},ch=s.chaleco||{},ar=s.armaCorta||{},al=s.armaLarga||{};return{
-    FECHA:fmtFecha(c.fecha), PERIODO:fmtPeriodo(c.periodo), LP:c.lp, APELLIDO:s.apellido, NOMBRE:s.nombre, JERARQUIA:s.jerarquia, DESTINO:s.destino,
-    RESULTADO:c.resultado, 'SIN CHALECO':s.sinChaleco?'SI':'NO',
-    'CHALECO MARCA':ch.fabricante, 'CHALECO MODELO':ch.modelo, 'CHALECO Nº SERIE':ch.nroSerie,
-    'ARMA MODELO':ar.modelo, 'ARMA Nº SERIE':ar.nroSerie,
-    'ARMA LARGA':[al.tipo,al.marca,al.modelo].filter(Boolean).join(' '), 'ARMA LARGA Nº SERIE':al.nroSerie,
-    FUNDA:s.funda||'', 'ESPOSAS Nº SERIE':s.esposasNroSerie||'',
-    'ARMERO':c.armero||c.controladoPor||'', 'ARMERO LP':c.armeroLp||'', OBSERVACIONES:c.observaciones
+  if(list.length===0) return null;
+  const columns=[
+    {header:'FECHA',key:'FECHA',width:12,align:'center'},{header:'PERÍODO',key:'PER',width:14},
+    {header:'LP',key:'LP',width:9},{header:'APELLIDO',key:'AP',width:20},{header:'NOMBRE',key:'NO',width:20},
+    {header:'JERARQUÍA',key:'JER',width:16},{header:'DESTINO',key:'DEST',width:30},
+    {header:'RESULTADO',key:'RES',width:13},{header:'SIN CHALECO',key:'SIN_CH',width:11,align:'center'},
+    {header:'CHALECO MARCA',key:'CH_MAR',width:18},{header:'CHALECO MODELO',key:'CH_MOD',width:16},{header:'CHALECO Nº SERIE',key:'CH_SER',width:16},
+    {header:'ARMA MODELO',key:'AR_MOD',width:18},{header:'ARMA Nº SERIE',key:'AR_SER',width:15},
+    {header:'ARMA LARGA',key:'AL',width:20},{header:'ARMA LARGA Nº SERIE',key:'AL_SER',width:16},
+    {header:'FUNDA',key:'FUNDA',width:12},{header:'ESPOSAS Nº SERIE',key:'ESP',width:15},
+    {header:'ARMERO',key:'ARM',width:24},{header:'ARMERO LP',key:'ARM_LP',width:11,align:'center'},
+    {header:'OBSERVACIONES',key:'OBS',width:34}
+  ];
+  const rows=list.map(c=>{const s=c.snap||{},ch=s.chaleco||{},ar=s.armaCorta||{},al=s.armaLarga||{};return{
+    FECHA:fmtFecha(c.fecha),PER:fmtPeriodo(c.periodo),LP:c.lp,AP:s.apellido,NO:s.nombre,JER:s.jerarquia,DEST:(s.destino||'').replace(' (SOPE)',''),
+    RES:c.resultado,SIN_CH:s.sinChaleco?'SI':'NO',
+    CH_MAR:ch.fabricante||'',CH_MOD:ch.modelo||'',CH_SER:ch.nroSerie||'',
+    AR_MOD:ar.modelo||'',AR_SER:ar.nroSerie||'',
+    AL:[al.tipo,al.marca,al.modelo].filter(Boolean).join(' '),AL_SER:al.nroSerie||'',
+    FUNDA:s.funda||'',ESP:s.esposasNroSerie||'',
+    ARM:c.armero||c.controladoPor||'',ARM_LP:c.armeroLp||'',OBS:c.observaciones||''
   };});
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),'Historial');
-  XLSX.writeFile(wb,'historial_controles_'+todayISO()+'.xlsx');
+  const sub = histFilters.periodo ? ('Período '+fmtPeriodo(histFilters.periodo)) : 'Todos los períodos';
+  return { filename:'historial_controles_'+todayISO()+'.xlsx',
+    sheets:[{name:'Historial', title:'HISTORIAL DE CONTROLES DE REVISTA',
+      subtitle:'División Armería y Logística · DPEM — '+sub, columns, rows}] };
 }
 
-/* Exporta la revista de un período: hoja de controlados (con material + armero)
-   y hoja con el desglose de los que NO se controlaron. */
-function exportRevista(periodo){
+function buildRevistaData(periodo){
   const per=periodo||currentPeriodo();
   const efs=Object.values(state.efectivos).sort(cmpEfectivo);
+  const colsC=[
+    {header:'LP',key:'LP',width:9},{header:'JERARQUÍA',key:'JER',width:16},
+    {header:'APELLIDO',key:'AP',width:20},{header:'NOMBRE',key:'NO',width:20},{header:'DNI',key:'DNI',width:12},
+    {header:'DESTINO',key:'DEST',width:30},
+    {header:'FECHA CONTROL',key:'FC',width:14,align:'center'},{header:'RESULTADO',key:'RES',width:13},
+    {header:'SIN CHALECO',key:'SIN_CH',width:11,align:'center'},
+    {header:'CHALECO MARCA',key:'CH_MAR',width:18},{header:'CHALECO MODELO',key:'CH_MOD',width:16},
+    {header:'CHALECO Nº SERIE',key:'CH_SER',width:16},{header:'CHALECO FABRIC.',key:'CH_FAB',width:14},
+    {header:'ARMA MODELO',key:'AR_MOD',width:18},{header:'ARMA Nº SERIE',key:'AR_SER',width:15},
+    {header:'ARMA LARGA',key:'AL',width:20},{header:'ARMA LARGA Nº SERIE',key:'AL_SER',width:16},
+    {header:'FUNDA',key:'FUNDA',width:12},{header:'ESPOSAS Nº SERIE',key:'ESP',width:15},
+    {header:'ARMERO',key:'ARM',width:24},{header:'ARMERO LP',key:'ARM_LP',width:11,align:'center'},
+    {header:'OBSERVACIONES DEL ARMERO',key:'OBS',width:36}
+  ];
+  const colsS=[
+    {header:'LP',key:'LP',width:9},{header:'JERARQUÍA',key:'JER',width:16},
+    {header:'APELLIDO',key:'AP',width:20},{header:'NOMBRE',key:'NO',width:20},{header:'DNI',key:'DNI',width:12},
+    {header:'DESTINO',key:'DEST',width:34},{header:'SIN CHALECO',key:'SIN_CH',width:11,align:'center'},
+    {header:'ESTADO',key:'EST',width:26}
+  ];
   const controlados=[], sinControlar=[];
   efs.forEach(e=>{
     const c=controlEnPeriodo(e.lp,per);
@@ -1008,35 +1128,37 @@ function exportRevista(periodo){
       const s=c.snap||{}, ch=s.chaleco||e.chaleco||{}, ar=s.armaCorta||e.armaCorta||{}, al=s.armaLarga||e.armaLarga||{};
       const sinCh = s.sinChaleco!==undefined ? s.sinChaleco : e.sinChaleco;
       controlados.push({
-        LP:e.lp, JERARQUIA:e.jerarquia, APELLIDO:e.apellido, NOMBRE:e.nombre, DNI:e.dni,
-        DESTINO:(e.destino||'').replace(' (SOPE)',''),
-        'FECHA CONTROL':fmtFecha(c.fecha), RESULTADO:c.resultado,
-        'SIN CHALECO':sinCh?'SI':'NO',
-        'CHALECO MARCA':sinCh?'NO POSEE':(ch.fabricante||''), 'CHALECO MODELO':sinCh?'':(ch.modelo||''),
-        'CHALECO Nº SERIE':sinCh?'':(ch.nroSerie||''), 'CHALECO FABRICACION':sinCh?'':(ch.fechaFab||''),
-        'ARMA MODELO':ar.modelo||'', 'ARMA Nº SERIE':ar.nroSerie||'',
-        'ARMA LARGA':[al.tipo,al.marca,al.modelo].filter(Boolean).join(' '), 'ARMA LARGA Nº SERIE':al.nroSerie||'',
-        'FUNDA':s.funda||e.funda||'', 'ESPOSAS Nº SERIE':s.esposasNroSerie||e.esposasNroSerie||'',
-        'ARMERO':c.armero||c.controladoPor||'', 'ARMERO LP':c.armeroLp||'',
-        'OBSERVACIONES DEL ARMERO':c.observaciones||''
+        LP:e.lp,JER:e.jerarquia,AP:e.apellido,NO:e.nombre,DNI:e.dni,DEST:(e.destino||'').replace(' (SOPE)',''),
+        FC:fmtFecha(c.fecha),RES:c.resultado,SIN_CH:sinCh?'SI':'NO',
+        CH_MAR:sinCh?'NO POSEE':(ch.fabricante||''),CH_MOD:sinCh?'':(ch.modelo||''),CH_SER:sinCh?'':(ch.nroSerie||''),CH_FAB:sinCh?'':(ch.fechaFab||''),
+        AR_MOD:ar.modelo||'',AR_SER:ar.nroSerie||'',
+        AL:[al.tipo,al.marca,al.modelo].filter(Boolean).join(' '),AL_SER:al.nroSerie||'',
+        FUNDA:s.funda||e.funda||'',ESP:s.esposasNroSerie||e.esposasNroSerie||'',
+        ARM:c.armero||c.controladoPor||'',ARM_LP:c.armeroLp||'',OBS:c.observaciones||''
       });
     }else{
       sinControlar.push({
-        LP:e.lp, JERARQUIA:e.jerarquia, APELLIDO:e.apellido, NOMBRE:e.nombre, DNI:e.dni,
-        DESTINO:(e.destino||'').replace(' (SOPE)',''),
-        'SIN CHALECO':e.sinChaleco?'SI':'NO',
-        'ESTADO':'SIN CONTROL EN '+fmtPeriodo(per).toUpperCase()
+        LP:e.lp,JER:e.jerarquia,AP:e.apellido,NO:e.nombre,DNI:e.dni,DEST:(e.destino||'').replace(' (SOPE)',''),
+        SIN_CH:e.sinChaleco?'SI':'NO',EST:'SIN CONTROL EN '+fmtPeriodo(per).toUpperCase()
       });
     }
   });
-  if(controlados.length===0 && sinControlar.length===0){ toast('No hay efectivos en el padrón','err'); return; }
-  const wb=XLSX.utils.book_new();
-  const wsC=XLSX.utils.json_to_sheet(controlados.length?controlados:[{INFO:'Sin efectivos controlados en '+fmtPeriodo(per)}]);
-  const wsS=XLSX.utils.json_to_sheet(sinControlar.length?sinControlar:[{INFO:'Todos los efectivos fueron controlados en '+fmtPeriodo(per)}]);
-  XLSX.utils.book_append_sheet(wb,wsC,'Controlados');
-  XLSX.utils.book_append_sheet(wb,wsS,'Sin controlar');
-  XLSX.writeFile(wb,'revista_DPEM_'+per+'.xlsx');
-  toast(controlados.length+' controlados · '+sinControlar.length+' sin controlar');
+  if(controlados.length===0 && sinControlar.length===0) return null;
+  const subC='Período '+fmtPeriodo(per)+' — '+controlados.length+' controlados';
+  const subS='Período '+fmtPeriodo(per)+' — '+sinControlar.length+' sin controlar';
+  return { filename:'revista_DPEM_'+per+'.xlsx', meta:{controlados:controlados.length,sinControlar:sinControlar.length,per},
+    sheets:[
+      {name:'Controlados', title:'REVISTA — EFECTIVOS CONTROLADOS', subtitle:subC, columns:colsC, rows:controlados},
+      {name:'Sin controlar', title:'REVISTA — EFECTIVOS SIN CONTROLAR', subtitle:subS, columns:colsS, rows:sinControlar}
+    ] };
+}
+
+async function exportPadron(){ await writeWorkbook(buildPadronData()); }
+async function exportHistorial(){ const d=buildHistorialData(); if(!d){ toast('No hay controles para exportar','err'); return; } await writeWorkbook(d); }
+async function exportRevista(periodo){
+  const d=buildRevistaData(periodo); if(!d){ toast('No hay efectivos en el padrón','err'); return; }
+  await writeWorkbook(d);
+  toast(d.meta.controlados+' controlados · '+d.meta.sinControlar+' sin controlar');
 }
 
 /* ==================================================================
