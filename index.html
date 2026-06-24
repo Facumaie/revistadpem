@@ -358,6 +358,10 @@
           <input type="file" id="fileRestore" accept=".json" style="display:none">
           <button class="btn ghost sm admin-only" id="btnRestore">Restaurar respaldo</button>
         </div>
+        <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+        <h3 style="margin-bottom:6px">Reinicializar padrón</h3>
+        <p class="hint" style="margin-top:0">Reemplaza <b>todo</b> el padrón por la nómina oficial (200 efectivos) con el material balístico precargado por LP. Elimina los registros actuales de efectivos. No afecta el historial de controles.</p>
+        <button class="btn danger sm admin-only" id="btnReinit">Reinicializar padrón completo</button>
       </div>
       <div class="panel full admin-only" style="grid-column:1/-1">
         <h3>Almacenamiento compartido (Firebase)</h3>
@@ -581,7 +585,8 @@ async function initFirebase(cfg){
     fb={app,db,fs:fsMod};
     mode='firebase';
     fsMod.onSnapshot(fsMod.collection(db,'efectivos'), async snap=>{
-      const m={}; snap.forEach(d=>m[d.id]=d.data()); state.efectivos=m;
+      const m={}; snap.forEach(d=>{ const data=d.data()||{}; if(data.lp===undefined||data.lp===null||data.lp===''){ data.lp=String(d.id); } m[d.id]=data; });
+      state.efectivos=m;
       if(snap.empty && !_fbSeeded){ _fbSeeded=true; await seedFirebase(); return; }
       _fbSeeded=true;
       renderAll(); setMode('firebase');
@@ -782,6 +787,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeOverlay(); })
 /* ---------- Modal: editar/crear ficha ---------- */
 function openFicha(lp){
   const isNew=!lp;
+  if(!isNew && !state.efectivos[lp]){ toast('No se encontró el efectivo (LP '+lp+')','err'); return; }
   const e=isNew?Object.assign({lp:'',apellido:'',nombre:'',dni:'',jerarquia:'',destino:'',activo:true},blankMaterial()):JSON.parse(JSON.stringify(state.efectivos[lp]));
   const ch=e.chaleco||{}, ac=e.armaCorta||{}, al=e.armaLarga||{};
   openOverlay(`
@@ -1266,6 +1272,27 @@ $('#fileRestore').addEventListener('change',e=>{
     renderAll(); $('#vidaUtil').value=state.config.vidaUtilMeses; toast('Respaldo restaurado');
   }catch(err){ toast('Archivo de respaldo inválido','err'); } };
   r.readAsText(f); e.target.value='';
+});
+$('#btnReinit')?.addEventListener('click',async()=>{
+  if(!confirm('Vas a REEMPLAZAR todo el padrón actual por la nómina oficial (200 efectivos) con el material precargado.\n\nLos efectivos actuales se eliminan. El historial de controles NO se toca.\n\n¿Continuar?')) return;
+  if(!confirm('Confirmación final: esta acción es irreversible. ¿Reinicializar el padrón ahora?')) return;
+  try{
+    const fresh={}; seedFromNomina(fresh);
+    if(mode==='firebase' && fb){
+      toast('Reinicializando en Firebase…');
+      // borrar todos los docs existentes
+      const snap=await fb.fs.getDocs(fb.fs.collection(fb.db,'efectivos'));
+      for(const d of snap.docs){ try{ await fb.fs.deleteDoc(fb.fs.doc(fb.db,'efectivos',d.id)); }catch(_){} }
+      // escribir nómina + material
+      for(const lp of Object.keys(fresh)){ try{ await fb.fs.setDoc(fb.fs.doc(fb.db,'efectivos',lp), fresh[lp]); }catch(_){} }
+      LS.set(MAT_SEED_VER,true); _backfillDone=true;
+      toast('Padrón reinicializado ('+Object.keys(fresh).length+' efectivos)');
+    } else {
+      state.efectivos=fresh; LS.set(K_EF,state.efectivos);
+      LS.set(MAT_SEED_VER,true); _backfillDone=true;
+      renderAll(); toast('Padrón reinicializado ('+Object.keys(fresh).length+' efectivos)');
+    }
+  }catch(err){ console.error(err); toast('No se pudo reinicializar el padrón','err'); }
 });
 // firebase
 $('#btnSaveFb').addEventListener('click',async()=>{
