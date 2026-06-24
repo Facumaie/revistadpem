@@ -535,15 +535,21 @@ function aplicarMaterialSemilla(e){
   if(!e.esposasNroSerie && mat.esposasNroSerie){ e.esposasNroSerie=mat.esposasNroSerie; ch=true; }
   return ch;
 }
+let _backfillDone=false, _backfilling=false;
 async function backfillMaterial(){
-  if(LS.get(MAT_SEED_VER,false)) return;
-  const cambiados=[]; Object.values(state.efectivos).forEach(e=>{ if(aplicarMaterialSemilla(e)) cambiados.push(e); });
-  if(cambiados.length){
-    if(mode==='firebase' && fb){ for(const e of cambiados){ e.actualizado=new Date().toISOString(); await fb.fs.setDoc(fb.fs.doc(fb.db,'efectivos',String(e.lp)), e); } }
-    else { LS.set(K_EF,state.efectivos); }
-    try{ toast('Material precargado en '+cambiados.length+' efectivos'); }catch(_){}
-  }
-  LS.set(MAT_SEED_VER,true);
+  try{
+    if(_backfilling || _backfillDone || LS.get(MAT_SEED_VER,false)) return;
+    _backfilling=true;
+    const cambiados=[];
+    Object.values(state.efectivos).forEach(e=>{ try{ if(aplicarMaterialSemilla(e)) cambiados.push(e); }catch(_){} });
+    if(cambiados.length){
+      if(mode==='firebase' && fb){ for(const e of cambiados){ try{ e.actualizado=new Date().toISOString(); await fb.fs.setDoc(fb.fs.doc(fb.db,'efectivos',String(e.lp)), e); }catch(_){} } }
+      else { LS.set(K_EF,state.efectivos); }
+      try{ toast('Material precargado en '+cambiados.length+' efectivos'); }catch(_){}
+    }
+    LS.set(MAT_SEED_VER,true); _backfillDone=true;
+  }catch(_){}
+  finally{ _backfilling=false; }
 }
 function seedFromNomina(targetMap){
   SEED_NOMINA.forEach(n=>{
@@ -562,7 +568,7 @@ function loadLocal(){
   state.efectivos=LS.get(K_EF,null) || {};
   state.controles=LS.get(K_CT,[]) || [];
   if(Object.keys(state.efectivos).length===0){ seedFromNomina(state.efectivos); LS.set(K_EF,state.efectivos); }
-  backfillMaterial();
+  try{ backfillMaterial(); }catch(_){}
 }
 
 async function initFirebase(cfg){
@@ -576,9 +582,10 @@ async function initFirebase(cfg){
     mode='firebase';
     fsMod.onSnapshot(fsMod.collection(db,'efectivos'), async snap=>{
       const m={}; snap.forEach(d=>m[d.id]=d.data()); state.efectivos=m;
-      if(!snap.empty){ _fbSeeded=true; await backfillMaterial(); }
-      else if(!_fbSeeded){ _fbSeeded=true; await seedFirebase(); return; }
+      if(snap.empty && !_fbSeeded){ _fbSeeded=true; await seedFirebase(); return; }
+      _fbSeeded=true;
       renderAll(); setMode('firebase');
+      backfillMaterial();
     }, err=>{ console.error(err); toast('Firebase: '+err.code,'err'); fallbackLocal(); });
     fsMod.onSnapshot(fsMod.collection(db,'controles'), snap=>{
       const a=[]; snap.forEach(d=>a.push(d.data())); state.controles=a; renderAll();
