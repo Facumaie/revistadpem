@@ -223,7 +223,8 @@
     <div class="loginLogo" role="img" aria-label="Superintendencia de Operaciones · Dirección Prevención en Eventos Masivos"></div>
     <h1>CONTROL DE REVISTA DPEM</h1>
     <p>División Armería y Logística · Acceso restringido</p>
-    <input id="loginPass" type="password" placeholder="Clave de acceso" autocomplete="off" inputmode="text">
+    <input id="loginLegajo" type="text" placeholder="Legajo (LP)" autocomplete="off" inputmode="numeric" style="margin-bottom:10px">
+    <input id="loginPass" type="password" placeholder="Clave (PIN)" autocomplete="off" inputmode="text" maxlength="6">
     <button id="loginBtn">Ingresar</button>
     <div class="loginErr" id="loginErr"></div>
   </div>
@@ -873,11 +874,13 @@ function openControl(lp){
   const ch=e?(e.chaleco||{}):{}, ac=e?(e.armaCorta||{}):{};
   const yaCtrl=e?controlEnPeriodo(e.lp,currentPeriodo()):null;
   const lastArmero=LS.get(K_ARM,{nombre:'',lp:''})||{nombre:'',lp:''};
-  const ARMEROS_EXCLUIDOS=new Set(['1092','458','17345','2281','82727','72233','7804','6380','16122','28223','16547','16457']);
-  const armeros=Object.values(state.efectivos)
-    .filter(x=>(x.destino||'').toUpperCase().includes('ARMERIA') && !ARMEROS_EXCLUIDOS.has(String(x.lp)))
-    .sort(cmpEfectivo);
-  const armOpts=armeros.map(x=>`<option value="${esc(x.lp)}" ${lastArmero.lp===String(x.lp)?'selected':''}>${esc((x.apellido||'')+', '+(x.nombre||''))} · LP ${esc(x.lp)}${x.jerarquia?' ('+esc(x.jerarquia)+')':''}</option>`).join('');
+  // Universo de armeros habilitados = usuarios con credencial (rol operativo)
+  const armeros=Object.keys(CREDENTIALS)
+    .filter(lp=>CREDENTIALS[lp].role==='user')
+    .map(lp=>({lp, nombre:CREDENTIALS[lp].nombre||''}))
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const armOpts=armeros.map(x=>`<option value="${esc(x.lp)}" ${lastArmero.lp===String(x.lp)?'selected':''}>${esc(x.nombre)} · LP ${esc(x.lp)}</option>`).join('');
+  const puedeElegirArmero = currentRole==='admin' || !!(currentUser&&currentUser.super);
   openOverlay(`
     <div class="mhead">
       <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke-linecap="round"/></svg></div>
@@ -908,10 +911,15 @@ function openControl(lp){
         </div>
       </fieldset>
       <fieldset style="margin-top:14px"><legend>Armero que realizó la revista</legend>
-        <p class="hint" style="margin-top:0">Persona física habilitada para la revista. Solo personal de la División Armería y Logística.</p>
+        ${puedeElegirArmero
+          ? `<p class="hint" style="margin-top:0">${currentRole==='admin'?'Persona física habilitada para la revista.':'Estás habilitado para registrar la revista a nombre de cualquier armero.'}</p>
         <label class="fld full">Armero
           <select id="c_arm"><option value="">— Seleccionar armero —</option>${armOpts}</select>
-        </label>
+        </label>`
+          : `<p class="hint" style="margin-top:0">La revista queda registrada a tu nombre con tu legajo. No es modificable.</p>
+        <label class="fld full">Armero
+          <input id="c_arm" type="text" value="${esc((currentUser&&currentUser.nombre)||'')} · LP ${esc((currentUser&&currentUser.legajo)||'')}" readonly style="opacity:.85;cursor:not-allowed">
+        </label>`}
         <label class="fld full" style="margin-top:12px">Observaciones del armero<textarea id="c_obs" rows="2" placeholder="Novedades, faltantes, estado del material…"></textarea></label>
       </fieldset>
     </div>
@@ -924,10 +932,18 @@ function openControl(lp){
     const clp=$('#c_lp').value;
     if(!clp){ toast('Seleccioná un efectivo','err'); return; }
     const ef=state.efectivos[clp]; if(!ef){ toast('Efectivo no encontrado','err'); return; }
-    const armeroLp=$('#c_arm').value;
-    if(!armeroLp){ toast('Seleccioná el armero que realizó la revista','err'); return; }
-    const armEf=state.efectivos[armeroLp];
-    const armero=armEf?((armEf.apellido||'')+', '+(armEf.nombre||'')):'';
+    let armero, armeroLp;
+    if(puedeElegirArmero){
+      armeroLp=$('#c_arm').value;
+      if(!armeroLp){ toast('Seleccioná el armero que realizó la revista','err'); return; }
+      const cr=CREDENTIALS[armeroLp];
+      const armEf=state.efectivos[armeroLp];
+      armero = (cr&&cr.nombre) ? cr.nombre : (armEf?((armEf.apellido||'')+', '+(armEf.nombre||'')):'');
+    } else {
+      armeroLp=(currentUser&&currentUser.legajo)||'';
+      armero=(currentUser&&currentUser.nombre)||'';
+      if(!armeroLp){ toast('No se pudo identificar al armero conectado','err'); return; }
+    }
     const fecha=$('#c_fecha').value||todayISO();
     // actualizar ficha con lo verificado (salvo que no posea chaleco)
     if(!ef.sinChaleco){
@@ -1321,28 +1337,67 @@ function toast(msg,type){
 
 /* -------------------- Login -------------------- */
 const AUTH_KEY='aryl_auth';
-const PASS_USER='DAYL1', PASS_ADMIN='Albo';
-let currentRole='user';
-function applyRole(role){
-  currentRole=role;
-  document.body.classList.toggle('is-admin', role==='admin');
+/* Credenciales individuales: cada armero ingresa con su LEGAJO (LP) y su PIN.
+   El PIN es personal e intransferible. Para rotar una clave, cambiá el valor 'pin'.
+   Rol 'admin' = acceso total · Rol 'user' = operativo (solo registra la revista a su nombre). */
+const CREDENTIALS = {
+  // ── ADMINISTRADOR (acceso total) ──
+  '27844': { pin:'Albo', role:'admin', nombre:'MAIELLARO RODRIGUEZ, FACUNDO' },
+  // ── ARMEROS habilitados para la revista (rol operativo) ──
+  '2070':  { pin:'2963', role:'user', super:true, nombre:'ESCOBAR, LAURA NOEMI' },
+  '2913':  { pin:'3501', role:'user', nombre:'ROMANO OZORIO, CARLOS JAVIER' },
+  '27127': { pin:'9675', role:'user', nombre:'PIETKIEWICZ, SEBASTIAN MANUEL' },
+  '8961':  { pin:'6272', role:'user', nombre:'PEREZ LINDO, GUSTAVO EZEQUIEL' },
+  '3903':  { pin:'0025', role:'user', nombre:'ROLDAN, EMANUEL' },
+  '3741':  { pin:'2857', role:'user', nombre:'LANDRIEL MONTERO, JESICA ROMINA' },
+  '5308':  { pin:'2366', role:'user', super:true, nombre:'FIGUEIRAS, LUCAS MARCELO' },
+  '6705':  { pin:'8493', role:'user', nombre:'GONZALEZ, NICOLAS MATIAS' },
+  '7063':  { pin:'8986', role:'user', nombre:'TILIAN, FEDERICO GONZALO' },
+  '7784':  { pin:'5096', role:'user', nombre:'BAEZ SUAREZ, DANIELA LUDMILA' },
+  '46792': { pin:'0753', role:'user', nombre:'GARCIA, FLAVIA LORENA' },
+  // ── Habilitados adicionales (rol operativo) ──
+  '2281':  { pin:'0387', role:'user', super:true, nombre:'DE ASPE, SEBASTIAN' },
+  '16122': { pin:'2894', role:'user', super:true, nombre:'RAMIREZ, CARLA LORENA' },
+  '85493': { pin:'5180', role:'user', super:true, nombre:'CECCHINI, CARLA (Auxiliar)' }
+};
+let currentRole='user', currentUser=null;
+function applyUser(u){
+  currentRole=u.role; currentUser=u;
+  document.body.classList.toggle('is-admin', u.role==='admin');
   const b=document.getElementById('roleBadge');
-  if(b){ b.textContent = role==='admin'?'Administrador':'Operativo'; b.className='roleBadge '+(role==='admin'?'adm':''); }
+  if(b){
+    const ape=(u.nombre||'').split(',')[0].trim();
+    b.textContent = (u.role==='admin'?'Administrador':'Operativo') + (ape?(' · '+ape):'');
+    b.className='roleBadge '+(u.role==='admin'?'adm':'');
+  }
 }
-function showApp(role){ applyRole(role||'user'); const l=document.getElementById('login'); if(l) l.classList.add('hide'); }
-function showLogin(){ const l=document.getElementById('login'); if(l) l.classList.remove('hide'); const p=document.getElementById('loginPass'); if(p){ p.value=''; setTimeout(()=>p.focus(),60);} }
+function showApp(u){ applyUser(u); const l=document.getElementById('login'); if(l) l.classList.add('hide'); }
+function showLogin(){
+  const l=document.getElementById('login'); if(l) l.classList.remove('hide');
+  const lg=document.getElementById('loginLegajo'), p=document.getElementById('loginPass');
+  if(p) p.value=''; if(lg){ lg.value=''; setTimeout(()=>lg.focus(),60); }
+}
 function tryLogin(){
-  const v=document.getElementById('loginPass').value;
-  let role=null;
-  if(v===PASS_ADMIN) role='admin';
-  else if(v===PASS_USER) role='user';
-  if(role){ try{ sessionStorage.setItem(AUTH_KEY,role); }catch(e){} document.getElementById('loginErr').textContent=''; showApp(role); }
-  else{ document.getElementById('loginErr').textContent='Clave incorrecta.'; const p=document.getElementById('loginPass'); p.value=''; p.focus(); }
+  const legajo=(document.getElementById('loginLegajo').value||'').trim();
+  const pin=(document.getElementById('loginPass').value||'').trim();
+  const err=document.getElementById('loginErr');
+  if(!legajo||!pin){ err.textContent='Ingresá tu legajo y tu clave.'; return; }
+  const cred=CREDENTIALS[legajo];
+  if(cred && pin===cred.pin){
+    const u={ legajo, role:cred.role, nombre:cred.nombre||'', super:!!cred.super };
+    try{ sessionStorage.setItem(AUTH_KEY,JSON.stringify(u)); }catch(e){}
+    err.textContent=''; showApp(u);
+  } else {
+    err.textContent='Legajo o clave incorrectos.';
+    const p=document.getElementById('loginPass'); p.value=''; p.focus();
+  }
 }
 function initAuth(){
-  let role=null; try{ role=sessionStorage.getItem(AUTH_KEY); }catch(e){}
-  if(role==='admin'||role==='user') showApp(role); else showLogin();
+  let u=null; try{ u=JSON.parse(sessionStorage.getItem(AUTH_KEY)||'null'); }catch(e){}
+  if(u && u.legajo && CREDENTIALS[u.legajo]){ const c=CREDENTIALS[u.legajo]; u.role=c.role; u.nombre=c.nombre||u.nombre; u.super=!!c.super; showApp(u); }
+  else showLogin();
   document.getElementById('loginBtn').addEventListener('click',tryLogin);
+  document.getElementById('loginLegajo').addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('loginPass').focus(); });
   document.getElementById('loginPass').addEventListener('keydown',e=>{ if(e.key==='Enter') tryLogin(); });
   document.getElementById('btnLogout').addEventListener('click',()=>{ try{ sessionStorage.removeItem(AUTH_KEY); }catch(e){} showLogin(); });
 }
