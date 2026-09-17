@@ -237,7 +237,7 @@ window.descargarManualRevista=function(){
     <h1>CONTROL DE REVISTA DPEM</h1>
     <p>División Armería y Logística · Acceso restringido</p>
     <input id="loginLegajo" type="text" placeholder="Legajo (LP)" autocomplete="off" inputmode="numeric" style="margin-bottom:10px">
-    <input id="loginPass" type="password" placeholder="Clave (PIN)" autocomplete="off" inputmode="text" maxlength="6">
+    <input id="loginPass" type="password" placeholder="Clave (por defecto, tu legajo)" autocomplete="off" inputmode="text" maxlength="10">
     <button id="loginBtn">Ingresar</button>
     <div class="loginErr" id="loginErr"></div>
   </div>
@@ -417,7 +417,7 @@ window.descargarManualRevista=function(){
       </div>
       <div class="panel full admin-only" style="grid-column:1/-1">
         <h3>Claves de acceso (PIN)</h3>
-        <p class="hint" style="margin-top:0">Cada usuario puede fijar su propia clave desde el botón <b>🔑 Mi clave</b> del encabezado. Como administrador, si alguien la olvida podés asignarle una nueva o restaurar la clave original de fábrica.</p>
+        <p class="hint" style="margin-top:0">La clave de fábrica de cada usuario es su propio <b>legajo</b>. Cada uno puede cambiarla desde el botón <b>🔑 Mi clave</b> del encabezado, o mantener la de fábrica si prefiere. Si alguien la olvida, desde acá le asignás una nueva o restaurás la clave = legajo.</p>
         <div id="gestionPines"></div>
       </div>
       <div class="panel full admin-only" style="grid-column:1/-1">
@@ -1786,7 +1786,7 @@ function renderGestionPines(){
         <td><span class="badge ${custom?'b-ok':'b-na'}"><span class="pip"></span>${custom?'Personalizada':'Por defecto'}</span></td>
         <td><div class="rowactions">
           <button class="btn ghost sm" data-setpin="${esc(f.lp)}">Asignar clave</button>
-          ${custom?`<button class="btn danger sm" data-resetpin="${esc(f.lp)}">Restaurar original</button>`:''}
+          ${custom?`<button class="btn danger sm" data-resetpin="${esc(f.lp)}">Restaurar clave = legajo</button>`:''}
         </div></td>
       </tr>`;
     }).join('')}</tbody>
@@ -1828,10 +1828,10 @@ function openSetPinAdmin(lp){
 
 function confirmResetPin(lp){
   const cred=CREDENTIALS[lp]; if(!cred) return;
-  openOverlay(`<div class="mhead"><div class="ic" style="color:var(--warn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><h3>Restaurar clave original</h3><p>${esc(cred.nombre||'')} · Legajo ${esc(lp)}</p></div><button class="x" data-close>×</button></div>
-  <div class="mbody"><p>Se eliminará la clave personalizada y el usuario volverá a ingresar con su <b>clave original de fábrica</b>. ¿Continuar?</p></div>
+  openOverlay(`<div class="mhead"><div class="ic" style="color:var(--warn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><h3>Restaurar clave = legajo</h3><p>${esc(cred.nombre||'')} · Legajo ${esc(lp)}</p></div><button class="x" data-close>×</button></div>
+  <div class="mbody"><p>Se eliminará la clave personalizada y el usuario volverá a ingresar con su <b>legajo como clave</b> (${esc(lp)}). ¿Continuar?</p></div>
   <div class="mfoot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" id="okResetPin">Restaurar</button></div>`);
-  $('#okResetPin').onclick=async()=>{ await resetPin(lp); closeOverlay(); renderGestionPines(); toast('Clave restaurada a la de fábrica'); };
+  $('#okResetPin').onclick=async()=>{ await resetPin(lp); closeOverlay(); renderGestionPines(); toast('Clave restaurada al legajo'); };
 }
 
 // Delegación de clicks del panel de claves
@@ -1848,23 +1848,23 @@ const AUTH_KEY='aryl_auth';
    Rol 'admin' = acceso total · Rol 'user' = operativo (solo registra la revista a su nombre). */
 const CREDENTIALS = {
   // ── ADMINISTRADOR (acceso total) ──
-  '27844': { pin:'Albo', role:'admin', nombre:'MAIELLARO RODRIGUEZ, FACUNDO' },
+  '27844': { pin:'27844', role:'admin', nombre:'MAIELLARO RODRIGUEZ, FACUNDO' },
   // ── ARMEROS habilitados para la revista (rol operativo) ──
-  '2070':  { pin:'2963', role:'user', super:true, nombre:'ESCOBAR, LAURA NOEMI' },
-  '2913':  { pin:'3501', role:'user', nombre:'ROMANO OZORIO, CARLOS JAVIER' },
-  '27127': { pin:'9675', role:'user', nombre:'PIETKIEWICZ, SEBASTIAN MANUEL' },
-  '8961':  { pin:'6272', role:'user', nombre:'PEREZ LINDO, GUSTAVO EZEQUIEL' },
-  '3903':  { pin:'0025', role:'user', nombre:'ROLDAN, EMANUEL' },
-  '3741':  { pin:'2857', role:'user', nombre:'LANDRIEL MONTERO, JESICA ROMINA' },
-  '5308':  { pin:'2366', role:'user', super:true, nombre:'FIGUEIRAS, LUCAS MARCELO' },
-  '6705':  { pin:'8493', role:'user', nombre:'GONZALEZ, NICOLAS MATIAS' },
-  '7063':  { pin:'8986', role:'user', nombre:'TILIAN, FEDERICO GONZALO' },
-  '7784':  { pin:'5096', role:'user', nombre:'BAEZ SUAREZ, DANIELA LUDMILA' },
-  '46792': { pin:'0753', role:'user', nombre:'GARCIA, FLAVIA LORENA' },
+  '2070': { pin:'2070', role:'user', super:true, nombre:'ESCOBAR, LAURA NOEMI' },
+  '2913': { pin:'2913', role:'user', nombre:'ROMANO OZORIO, CARLOS JAVIER' },
+  '27127': { pin:'27127', role:'user', nombre:'PIETKIEWICZ, SEBASTIAN MANUEL' },
+  '8961': { pin:'8961', role:'user', nombre:'PEREZ LINDO, GUSTAVO EZEQUIEL' },
+  '3903': { pin:'3903', role:'user', nombre:'ROLDAN, EMANUEL' },
+  '3741': { pin:'3741', role:'user', nombre:'LANDRIEL MONTERO, JESICA ROMINA' },
+  '5308': { pin:'5308', role:'user', super:true, nombre:'FIGUEIRAS, LUCAS MARCELO' },
+  '6705': { pin:'6705', role:'user', nombre:'GONZALEZ, NICOLAS MATIAS' },
+  '7063': { pin:'7063', role:'user', nombre:'TILIAN, FEDERICO GONZALO' },
+  '7784': { pin:'7784', role:'user', nombre:'BAEZ SUAREZ, DANIELA LUDMILA' },
+  '46792': { pin:'46792', role:'user', nombre:'GARCIA, FLAVIA LORENA' },
   // ── Habilitados adicionales (rol operativo) ──
-  '2281':  { pin:'0387', role:'user', super:true, nombre:'DE ASPE, SEBASTIAN' },
-  '16122': { pin:'2894', role:'user', super:true, nombre:'RAMIREZ, CARLA LORENA' },
-  '85493': { pin:'5180', role:'user', super:true, nombre:'CECCHINI, CARLA (Auxiliar)' }
+  '2281': { pin:'2281', role:'user', super:true, nombre:'DE ASPE, SEBASTIAN' },
+  '16122': { pin:'16122', role:'user', super:true, nombre:'RAMIREZ, CARLA LORENA' },
+  '85493': { pin:'85493', role:'user', super:true, nombre:'CECCHINI, CARLA (Auxiliar)' }
 };
 let currentRole='user', currentUser=null;
 function applyUser(u){
