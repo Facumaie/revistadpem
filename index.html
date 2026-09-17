@@ -1531,12 +1531,16 @@ function renderGuardia(){
 
 /* ---------- Datalists de cargos + roster de la División para "Infante de guardia" ---------- */
 function normTxt(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
-/* Roster de INFANTE DE GUARDIA: solo personal de la propia División Armería y Logística
-   (los habilitados para la revista, es decir, quienes tienen usuario en CREDENTIALS). */
+/* Roster de INFANTE DE GUARDIA: personal de la propia División Armería y Logística,
+   sin el administrador ni la línea de mando (Dirección), que no hacen guardia edilicia.
+   Ordenado alfabéticamente por apellido (el nombre ya está guardado "APELLIDO, NOMBRE"). */
 function rosterArmeria(){
-  return Object.keys(CREDENTIALS).map(lp=>({lp, nombre:CREDENTIALS[lp].nombre||''}))
+  const excluidos = new Set(['27844','1092','458','17345']); // Facundo (admin), YBALO, FUENTES, MURO
+  return Object.keys(CREDENTIALS)
+    .filter(lp=>!excluidos.has(lp))
+    .map(lp=>({lp, nombre:CREDENTIALS[lp].nombre||''}))
     .filter(x=>x.nombre)
-    .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+    .sort((a,b)=>a.nombre.localeCompare(b.nombre,'es'));
 }
 function buildGuardiaDatalists(){
   const lists={ dl_gdir:OPC_DIRECCION, dl_gjefe:OPC_JEFE, dl_gadmin:OPC_ADMIN };
@@ -1911,7 +1915,6 @@ const CREDENTIALS = {
   '2281':  { pin:'2281', role:'user', super:true, nombre:'DE ASPE, SEBASTIAN' },
   '5308':  { pin:'5308', role:'user', super:true, nombre:'FIGUEIRAS, LUCAS MARCELO' },
   '85493': { pin:'85493', role:'user', super:true, nombre:'CECCHINI, CARLA (Auxiliar)' },
-  '16122': { pin:'16122', role:'user', super:true, nombre:'RAMIREZ, CARLA LORENA' },
   // ── GUARDIA EDILICIA Y ARMERO (acceso operativo normal: revista con su propio nombre + guardia edilicia) ──
   '3903':  { pin:'3903', role:'user', nombre:'ROLDAN, EMANUEL' },
   '3741':  { pin:'3741', role:'user', nombre:'LANDRIEL MONTERO, JESICA ROMINA' },
@@ -1920,13 +1923,14 @@ const CREDENTIALS = {
   '7063':  { pin:'7063', role:'user', nombre:'TILIAN, FEDERICO GONZALO' },
   '7784':  { pin:'7784', role:'user', nombre:'BAEZ SUAREZ, DANIELA LUDMILA' },
   '46792': { pin:'46792', role:'user', nombre:'GARCIA, FLAVIA LORENA' },
-  '2913':  { pin:'2913', role:'user', nombre:'ROMANO OZORIO, CARLOS JAVIER' },
   // ── GUARDIA EDILICIA (solo completan el parte de guardia edilicia; sin acceso a revista/material) ──
+  '2913':  { pin:'2913', role:'user', nombre:'ROMANO OZORIO, CARLOS JAVIER', soloGuardia:true },
   '72233': { pin:'72233', role:'user', nombre:'MONTAÑA, MARCELO FABIAN', soloGuardia:true },
   '82727': { pin:'82727', role:'user', nombre:'GARCIA, DARIO EMMANUEL', soloGuardia:true },
   '7804':  { pin:'7804', role:'user', nombre:'MORINIGO, PAMELA JACKELINE', soloGuardia:true },
   '6380':  { pin:'6380', role:'user', nombre:'DIAZ, ALEJANDRO JAVIER', soloGuardia:true },
   '28223': { pin:'28223', role:'user', nombre:'REJALA, SABRINA EDITH', soloGuardia:true },
+  '16122': { pin:'16122', role:'user', nombre:'RAMIREZ, CARLA LORENA', soloGuardia:true },
   '16457': { pin:'16457', role:'user', nombre:'TORRENTE, EDUARDO NICOLAS', soloGuardia:true },
   '57440': { pin:'57440', role:'user', nombre:'MEDINA, ANDREA ELISABET', soloGuardia:true }
 };
