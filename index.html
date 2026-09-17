@@ -252,6 +252,7 @@ window.descargarManualRevista=function(){
     <div class="spacer"></div>
     <div class="modepill"><span class="dot" id="modeDot"></span><span id="modeLabel">Local</span></div>
     <span class="roleBadge" id="roleBadge" style="margin-left:10px">Operativo</span>
+    <button class="logoutBtn" id="btnMiPin" title="Cambiar tu clave (PIN) de acceso" style="margin-left:8px">🔑 Mi clave</button>
     <button class="logoutBtn" id="btnManual" title="Descargar el manual de uso y resguardo (PDF)" style="margin-left:8px">📘 Manual</button>
     <button class="logoutBtn" id="btnLogout" style="margin-left:8px">Salir</button>
   </div>
@@ -259,6 +260,7 @@ window.descargarManualRevista=function(){
     <button data-view="resumen" class="active">Resumen</button>
     <button data-view="padron">Revista <span class="cnt" id="cntPadron">0</span></button>
     <button data-view="historial">Historial <span class="cnt" id="cntHist">0</span></button>
+    <button data-view="guardia">Guardia edilicia <span class="cnt" id="cntGuardia">0</span></button>
     <button data-view="ajustes">Ajustes</button>
   </nav>
 </header>
@@ -345,6 +347,41 @@ window.descargarManualRevista=function(){
     </div>
   </section>
 
+  <!-- ============ GUARDIA EDILICIA ============ -->
+  <section class="view" id="view-guardia">
+    <h2 class="section">Guardia edilicia — partes de inicio y cierre</h2>
+    <p class="sub">Reemplazo digital del libro físico. Cada parte queda guardado y buscable. Generá el texto listo para pasar por WhatsApp a la línea de mando.</p>
+    <div class="toolbar">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4" stroke-linecap="round"/></svg>
+        <input id="searchGuardia" placeholder="Buscar por fecha, infante, novedades…">
+      </div>
+      <select id="filterGuEdificio">
+        <option value="">Ambos edificios</option>
+        <option value="PRINCIPAL">Edificio principal</option>
+        <option value="ANEXO">Anexo</option>
+      </select>
+      <select id="filterGuTipo">
+        <option value="">Inicio y cierre</option>
+        <option value="INICIO">Inicio</option>
+        <option value="CIERRE">Cierre</option>
+      </select>
+      <input type="date" id="filterGuFecha" title="Filtrar por fecha">
+      <button class="btn ghost sm" id="btnExportGuardia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke-linecap="round" stroke-linejoin="round"/></svg>Exportar Excel</button>
+      <button class="btn" id="btnNuevoParte"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>Nuevo parte</button>
+    </div>
+    <div class="tablewrap">
+      <div class="tscroll">
+        <table id="tableGuardia">
+          <thead><tr>
+            <th>Fecha</th><th>Edificio</th><th>Tipo</th><th>Infante de guardia</th><th>Horario</th><th>Novedades</th><th>Registró</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ AJUSTES ============ -->
   <section class="view" id="view-ajustes">
     <h2 class="section">Ajustes y datos</h2>
@@ -377,6 +414,11 @@ window.descargarManualRevista=function(){
         <h3 style="margin-bottom:6px">Reinicializar padrón</h3>
         <p class="hint" style="margin-top:0">Reemplaza <b>todo</b> el padrón por la nómina oficial (200 efectivos) con el material balístico precargado por LP. Elimina los registros actuales de efectivos. No afecta el historial de controles.</p>
         <button class="btn danger sm admin-only" id="btnReinit">Reinicializar padrón completo</button>
+      </div>
+      <div class="panel full admin-only" style="grid-column:1/-1">
+        <h3>Claves de acceso (PIN)</h3>
+        <p class="hint" style="margin-top:0">Cada usuario puede fijar su propia clave desde el botón <b>🔑 Mi clave</b> del encabezado. Como administrador, si alguien la olvida podés asignarle una nueva o restaurar la clave original de fábrica.</p>
+        <div id="gestionPines"></div>
       </div>
       <div class="panel full admin-only" style="grid-column:1/-1">
         <h3>Almacenamiento compartido (Firebase)</h3>
@@ -438,9 +480,18 @@ const LS = {
   set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){ toast('No se pudo guardar localmente','err'); } },
   del(k){ try{ localStorage.removeItem(k); }catch(e){} }
 };
-const K_EF='aryl_efectivos', K_CT='aryl_controles', K_CFG='aryl_config', K_ARM='aryl_armero';
+const K_EF='aryl_efectivos', K_CT='aryl_controles', K_CFG='aryl_config', K_ARM='aryl_armero', K_PT='aryl_partes', K_PIN='aryl_pins';
 
-let state = { efectivos:{}, controles:[], config:{ vidaUtilMeses:60, firebase:null } };
+/* Claves personalizadas por legajo (reemplazan al PIN de fábrica). Se sincronizan por Firebase
+   y se espejan en localStorage para que el login funcione aun sin conexión. */
+let pinOverrides = {};
+
+/* Opciones para los cargos del parte de guardia edilicia (editables: se puede tipear otro nombre) */
+const OPC_DIRECCION = ['Subcomisario Iván FUENTES','Subcomisario Marcelo MURO','Comisario Lorena YBALO'];
+const OPC_JEFE      = ['Inspector Sebastián DE ASPE','Principal Laura ESCOBAR','Inspector Lucas FIGUEIRAS'];
+const OPC_ADMIN     = ['Auxiliar Carla CECCHINI','Inspector Lucas FIGUEIRAS','Oficial Carla RAMIREZ'];
+
+let state = { efectivos:{}, controles:[], partes:[], config:{ vidaUtilMeses:60, firebase:null } };
 let fb = null;            // backend Firebase activo
 let mode = 'local';       // 'local' | 'firebase'
 let _fbSeeded = false;
@@ -540,6 +591,29 @@ async function removeEfectivo(lp){
   if(mode==='firebase' && fb){ await fb.fs.deleteDoc(fb.fs.doc(fb.db,'efectivos',String(lp))); }
   else { LS.set(K_EF,state.efectivos); }
 }
+async function persistParte(p){
+  const i=state.partes.findIndex(x=>x.id===p.id);
+  if(i>=0) state.partes[i]=p; else state.partes.push(p);
+  if(mode==='firebase' && fb){ await fb.fs.setDoc(fb.fs.doc(fb.db,'partes_guardia',p.id), p); }
+  else { LS.set(K_PT,state.partes); }
+}
+async function removeParte(id){
+  state.partes=state.partes.filter(p=>p.id!==id);
+  if(mode==='firebase' && fb){ await fb.fs.deleteDoc(fb.fs.doc(fb.db,'partes_guardia',id)); }
+  else { LS.set(K_PT,state.partes); }
+}
+function loadPinsLocal(){ pinOverrides = LS.get(K_PIN,{}) || {}; }
+async function setPin(legajo, nuevo){
+  legajo=String(legajo); pinOverrides[legajo]=String(nuevo); LS.set(K_PIN,pinOverrides);
+  if(mode==='firebase' && fb){ try{ await fb.fs.setDoc(fb.fs.doc(fb.db,'pins',legajo), {pin:String(nuevo), actualizado:new Date().toISOString(), por:(currentUser&&currentUser.legajo)||''}); }catch(e){ console.error(e); } }
+}
+async function resetPin(legajo){
+  legajo=String(legajo); delete pinOverrides[legajo]; LS.set(K_PIN,pinOverrides);
+  if(mode==='firebase' && fb){ try{ await fb.fs.deleteDoc(fb.fs.doc(fb.db,'pins',legajo)); }catch(e){ console.error(e); } }
+}
+/* PIN efectivo de un legajo: la clave personalizada si existe; si no, la de fábrica. */
+function pinDe(legajo){ const c=CREDENTIALS[legajo]; if(!c) return null; const o=pinOverrides[String(legajo)]; return (o!==undefined && o!=='') ? String(o) : c.pin; }
+function tienePinCustom(legajo){ const o=pinOverrides[String(legajo)]; return o!==undefined && o!==''; }
 function persistConfig(){ LS.set(K_CFG,state.config); }
 
 /* -------------------- Carga inicial -------------------- */
@@ -592,6 +666,8 @@ function loadLocal(){
   state.config=Object.assign({vidaUtilMeses:60,firebase:null}, LS.get(K_CFG,{}));
   state.efectivos=LS.get(K_EF,null) || {};
   state.controles=LS.get(K_CT,[]) || [];
+  state.partes=LS.get(K_PT,[]) || [];
+  loadPinsLocal();
   if(Object.keys(state.efectivos).length===0){ seedFromNomina(state.efectivos); LS.set(K_EF,state.efectivos); }
   try{ backfillMaterial(); }catch(_){}
 }
@@ -615,6 +691,14 @@ async function initFirebase(cfg){
     }, err=>{ console.error(err); toast('Firebase: '+err.code,'err'); fallbackLocal(); });
     fsMod.onSnapshot(fsMod.collection(db,'controles'), snap=>{
       const a=[]; snap.forEach(d=>a.push(d.data())); state.controles=a; renderAll();
+    }, err=>console.error(err));
+    fsMod.onSnapshot(fsMod.collection(db,'partes_guardia'), snap=>{
+      const a=[]; snap.forEach(d=>{ const x=d.data()||{}; if(!x.id) x.id=d.id; a.push(x); }); state.partes=a; renderAll();
+    }, err=>console.error(err));
+    fsMod.onSnapshot(fsMod.collection(db,'pins'), snap=>{
+      const m={}; snap.forEach(d=>{ const x=d.data()||{}; if(x.pin!==undefined && x.pin!=='') m[d.id]=String(x.pin); });
+      pinOverrides=m; LS.set(K_PIN,pinOverrides); // espeja para logins offline
+      if(currentRole==='admin' && typeof renderGestionPines==='function') renderGestionPines();
     }, err=>console.error(err));
   }catch(e){ console.error(e); toast('No se pudo conectar a Firebase','err'); fallbackLocal(); }
 }
@@ -651,7 +735,7 @@ function buildDatalists(){
 /* ==================================================================
    RENDER
    ================================================================== */
-function renderAll(){ buildDatalists(); renderResumen(); renderPadron(); renderHistorial(); refreshFilters(); updateCounts(); }
+function renderAll(){ buildDatalists(); renderResumen(); renderPadron(); renderHistorial(); renderGuardia(); refreshFilters(); updateCounts(); }
 function updateCounts(){
   $('#cntPadron').textContent=Object.keys(state.efectivos).length;
   $('#cntHist').textContent=state.controles.length;
@@ -1350,6 +1434,291 @@ $('#btnClearFb').addEventListener('click',()=>{
   toast('Volviendo a modo Local — recargando…'); setTimeout(()=>location.reload(),700);
 });
 
+/* ==================================================================
+   GUARDIA EDILICIA — partes de inicio y cierre
+   ================================================================== */
+const guardiaFilters={ q:'', edificio:'', tipo:'', fecha:'' };
+function fmtFechaDash(iso){ if(!iso) return '—'; const [y,m,dd]=iso.split('-'); return dd+'-'+m+'-'+y; }
+function nowHM(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function edificioLabel(ed){ return ed==='ANEXO'?'Anexo':'Edificio principal'; }
+
+function plantillaNovedades(tipo,edificio){
+  const ed = edificio==='ANEXO' ? 'anexo' : 'edificio principal';
+  const arr=[
+    'Horas '+nowHM()+' Tomo la guardia las novedades que anteceden.',
+    'Se realizan recorridos interior y exterior del '+ed+'.'
+  ];
+  if(tipo==='CIERRE'){ arr.push('Horas '+nowHM()+' soy relevado/a por el/la ______ con las novedades que anteceden.'); }
+  return arr;
+}
+function parteTitulo(p){ return '*PARTE INFORMATIVO - GUARDIA EDILICIA'+(p.edificio==='ANEXO'?' ANEXO':'')+'-*'; }
+function parteToText(p){
+  const nov=(p.novedades||[]).map(x=>String(x||'').trim()).filter(Boolean);
+  const L=[];
+  L.push(parteTitulo(p));
+  L.push('');
+  L.push('*División ARMERÍA Y LOGÍSTICA*');
+  L.push('');
+  L.push('*FECHA: '+fmtFechaDash(p.fecha)+'*');
+  L.push('*Oficial de Dirección:* '+(p.oficialDireccion||''));
+  L.push('*Jefe de servicio:* '+(p.jefeServicio||''));
+  L.push('*Administración:* '+(p.administracion||''));
+  L.push('');
+  L.push('*Guardia Edilicia Dependencia*');
+  L.push('*Infante de guardia*: '+(p.infante||''));
+  L.push('*Horario:* '+(p.horario||''));
+  L.push('*Novedades:*');
+  nov.forEach((n,i)=>L.push((i+1)+'. '+n));
+  return L.join('\n');
+}
+async function copiarTexto(txt){
+  try{ await navigator.clipboard.writeText(txt); toast('Parte copiado — pegalo en WhatsApp'); }
+  catch(_){
+    try{ const ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('Parte copiado — pegalo en WhatsApp'); }
+    catch(e){ toast('No se pudo copiar automáticamente','err'); }
+  }
+}
+
+function renderGuardia(){
+  const cnt=$('#cntGuardia'); if(cnt) cnt.textContent=state.partes.length;
+  const tbody=$('#tableGuardia tbody'); if(!tbody) return;
+  let list=[...state.partes].sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||'')||(b.creado||'').localeCompare(a.creado||''));
+  const q=guardiaFilters.q.toLowerCase().trim();
+  list=list.filter(p=>{
+    if(guardiaFilters.edificio && p.edificio!==guardiaFilters.edificio) return false;
+    if(guardiaFilters.tipo && p.tipo!==guardiaFilters.tipo) return false;
+    if(guardiaFilters.fecha && p.fecha!==guardiaFilters.fecha) return false;
+    if(q){ const hay=((p.fecha||'')+' '+(p.infante||'')+' '+(p.horario||'')+' '+(p.oficialDireccion||'')+' '+(p.jefeServicio||'')+' '+(p.administracion||'')+' '+((p.novedades||[]).join(' '))).toLowerCase(); if(!hay.includes(q)) return false; }
+    return true;
+  });
+  if(list.length===0){ tbody.innerHTML=`<tr><td colspan="8"><div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16v16H4zM8 9h8M8 13h8M8 17h5" stroke-linecap="round" stroke-linejoin="round"/></svg><div>No hay partes registrados con estos filtros.</div></div></td></tr>`; return; }
+  tbody.innerHTML=list.map(p=>{
+    const nov=(p.novedades||[]).map(x=>String(x||'').trim()).filter(Boolean);
+    const resumen=nov[0]?esc(nov[0].slice(0,70))+(nov[0].length>70?'…':''):'—';
+    const tcls=p.tipo==='CIERRE'?'b-warn':'b-ok';
+    const ecls=p.edificio==='ANEXO'?'b-na':'';
+    return `<tr>
+      <td class="nowrap mono">${esc(fmtFechaDash(p.fecha))}</td>
+      <td><span class="badge b-na ${ecls}"><span class="pip"></span>${esc(edificioLabel(p.edificio))}</span></td>
+      <td><span class="badge ${tcls}"><span class="pip"></span>${esc(p.tipo==='CIERRE'?'Cierre':'Inicio')}</span></td>
+      <td class="nm">${esc(p.infante||'—')}</td>
+      <td><span class="dst">${esc(p.horario||'—')}</span></td>
+      <td><span class="dst">${esc(nov.length)} pto${nov.length===1?'':'s'}.</span><br><small class="muted">${resumen}</small></td>
+      <td><small class="muted">${esc((p.autorNombre||'').split(',')[0]||'—')}</small></td>
+      <td><div class="rowactions">
+        <button class="iconbtn" title="Ver / copiar" data-verparte="${esc(p.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button class="iconbtn" title="Copiar para WhatsApp" data-copyparte="${esc(p.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <button class="iconbtn" title="Editar" data-editparte="${esc(p.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="iconbtn" title="Eliminar" data-delparte="${esc(p.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---------- Datalists de guardia (cargos + infantes desde la nómina) ---------- */
+function buildGuardiaDatalists(){
+  const nombres=[...new Set(Object.values(state.efectivos).map(e=>nombreCompleto(e)).filter(v=>v && v!==', '))].sort();
+  const lists={ dl_gdir:OPC_DIRECCION, dl_gjefe:OPC_JEFE, dl_gadmin:OPC_ADMIN, dl_ginfante:nombres };
+  let html='';
+  for(const id in lists){ html+='<datalist id="'+id+'">'+lists[id].map(v=>'<option value="'+esc(v)+'">').join('')+'</datalist>'; }
+  let host=$('#guardiaDatalists'); if(!host){ host=document.createElement('div'); host.id='guardiaDatalists'; document.body.appendChild(host); }
+  host.innerHTML=html;
+}
+
+/* ---------- Editor de novedades (líneas dinámicas) ---------- */
+function novRowHTML(val){
+  return `<div class="novrow" style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px">
+    <span class="novnum" style="min-width:22px;text-align:right;padding-top:9px;color:var(--muted);font-weight:700"></span>
+    <textarea class="novtxt" rows="1" style="flex:1;resize:vertical;min-height:38px" placeholder="Detalle de la novedad">${esc(val||'')}</textarea>
+    <button type="button" class="iconbtn novdel" title="Quitar" style="margin-top:4px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12" stroke-linecap="round"/></svg></button>
+  </div>`;
+}
+function renumNov(){ $$('#novList .novnum').forEach((el,i)=>el.textContent=(i+1)+'.'); }
+function getNovedades(){ return $$('#novList .novtxt').map(t=>t.value); }
+function refreshPreview(){
+  if(!$('#pg_fecha')||!$('#partePreview')) return;
+  const p=collectParteFromForm();
+  $('#partePreview').textContent=parteToText(p);
+}
+function collectParteFromForm(editing){
+  return {
+    id: (editing&&editing.id) || null,
+    fecha: $('#pg_fecha').value || todayISO(),
+    edificio: $('#pg_edificio').value || 'PRINCIPAL',
+    tipo: $('#pg_tipo').value || 'INICIO',
+    oficialDireccion: $('#pg_dir').value.trim(),
+    jefeServicio: $('#pg_jefe').value.trim(),
+    administracion: $('#pg_admin').value.trim(),
+    infante: $('#pg_infante').value.trim(),
+    horario: $('#pg_horario').value.trim(),
+    novedades: getNovedades()
+  };
+}
+
+function openParteForm(id){
+  buildGuardiaDatalists();
+  const isNew=!id;
+  const src = isNew ? {
+    id:null, fecha:todayISO(), edificio:'PRINCIPAL', tipo:'INICIO',
+    oficialDireccion:OPC_DIRECCION[0], jefeServicio:OPC_JEFE[0], administracion:OPC_ADMIN[0],
+    infante:'', horario:'de 18:00 hs a 06:00 hs',
+    novedades: plantillaNovedades('INICIO','PRINCIPAL')
+  } : JSON.parse(JSON.stringify(state.partes.find(p=>p.id===id)||{}));
+  if(!src || (!isNew && !src.id)){ toast('No se encontró el parte','err'); return; }
+  openOverlay(`
+    <div class="mhead">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4zM8 9h8M8 13h8M8 17h5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div><h3>${isNew?'Nuevo parte de guardia edilicia':'Editar parte'}</h3><p>División Armería y Logística · el texto para WhatsApp se genera solo</p></div>
+      <button class="x" data-close>×</button>
+    </div>
+    <div class="mbody">
+      <fieldset><legend>Datos del parte</legend>
+        <div class="formgrid">
+          <label class="fld">Fecha<input type="date" id="pg_fecha" value="${esc(src.fecha||todayISO())}"></label>
+          <label class="fld">Edificio<select id="pg_edificio">
+            <option value="PRINCIPAL">Edificio principal</option>
+            <option value="ANEXO">Anexo</option>
+          </select></label>
+          <label class="fld">Tipo de parte<select id="pg_tipo">
+            <option value="INICIO">Inicio (toma de guardia)</option>
+            <option value="CIERRE">Cierre (relevo)</option>
+          </select></label>
+          <label class="fld">Horario<input id="pg_horario" value="${esc(src.horario||'')}" placeholder="de 18:00 hs a 06:00 hs"></label>
+        </div>
+      </fieldset>
+      <fieldset><legend>Línea de mando</legend>
+        <div class="formgrid">
+          <label class="fld">Oficial de Dirección<input id="pg_dir" list="dl_gdir" value="${esc(src.oficialDireccion||'')}" placeholder="Grado y apellido"></label>
+          <label class="fld">Jefe de servicio<input id="pg_jefe" list="dl_gjefe" value="${esc(src.jefeServicio||'')}" placeholder="Grado y apellido"></label>
+          <label class="fld">Administración<input id="pg_admin" list="dl_gadmin" value="${esc(src.administracion||'')}" placeholder="Grado y apellido"></label>
+          <label class="fld">Infante de guardia<input id="pg_infante" list="dl_ginfante" value="${esc(src.infante||'')}" placeholder="Grado y apellido"></label>
+        </div>
+      </fieldset>
+      <fieldset><legend>Novedades</legend>
+        <div id="novList"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
+          <button type="button" class="btn ghost sm" id="btnAddNov"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>Agregar novedad</button>
+          <button type="button" class="btn ghost sm" id="btnPlantillaNov"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4zM8 9h8M8 13h5" stroke-linecap="round" stroke-linejoin="round"/></svg>Cargar plantilla</button>
+        </div>
+      </fieldset>
+      <fieldset><legend>Vista previa (así se pasa por WhatsApp)</legend>
+        <pre id="partePreview" style="white-space:pre-wrap;word-break:break-word;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px 14px;font-size:12.5px;margin:0;font-family:inherit;max-height:220px;overflow:auto"></pre>
+      </fieldset>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" data-close>Cancelar</button>
+      <button class="btn ghost" id="btnParteCopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copiar</button>
+      <button class="btn" id="btnParteSave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke-linecap="round"/></svg>Guardar y copiar</button>
+    </div>
+  `, true);
+  // set selects
+  $('#pg_edificio').value=src.edificio||'PRINCIPAL';
+  $('#pg_tipo').value=src.tipo||'INICIO';
+  // novedades
+  const nl=$('#novList');
+  nl.innerHTML=((src.novedades&&src.novedades.length)?src.novedades:['']).map(v=>novRowHTML(v)).join('');
+  renumNov(); refreshPreview();
+  // listeners dentro del modal (se recrea el nodo en cada apertura, no se apilan)
+  const modalEl=$('#overlay .modal');
+  modalEl.addEventListener('input',refreshPreview);
+  modalEl.addEventListener('change',refreshPreview);
+  $('#btnAddNov').addEventListener('click',()=>{ nl.insertAdjacentHTML('beforeend',novRowHTML('')); renumNov(); const rows=$$('#novList .novtxt'); rows[rows.length-1].focus(); refreshPreview(); });
+  nl.addEventListener('click',e=>{ const d=e.target.closest('.novdel'); if(d){ const row=d.closest('.novrow'); if($$('#novList .novrow').length>1) row.remove(); else row.querySelector('.novtxt').value=''; renumNov(); refreshPreview(); } });
+  $('#btnPlantillaNov').addEventListener('click',()=>{
+    const t=$('#pg_tipo').value, ed=$('#pg_edificio').value;
+    nl.innerHTML=plantillaNovedades(t,ed).map(v=>novRowHTML(v)).join('');
+    renumNov(); refreshPreview();
+  });
+  $('#btnParteCopy').addEventListener('click',()=>copiarTexto(parteToText(collectParteFromForm(src))));
+  $('#btnParteSave').addEventListener('click',async()=>{
+    const p=collectParteFromForm(src);
+    p.novedades=(p.novedades||[]).map(x=>String(x||'').trim()).filter(Boolean);
+    if(p.novedades.length===0){ toast('Cargá al menos una novedad','err'); return; }
+    if(!p.infante){ toast('Indicá el infante de guardia','err'); return; }
+    if(isNew){
+      p.id=uid(); p.creado=new Date().toISOString();
+      p.autorLp=(currentUser&&currentUser.legajo)||''; p.autorNombre=(currentUser&&currentUser.nombre)||'';
+    } else {
+      p.creado=src.creado||new Date().toISOString();
+      p.autorLp=src.autorLp||''; p.autorNombre=src.autorNombre||'';
+      p.editadoPor=(currentUser&&currentUser.nombre)||''; p.editado=new Date().toISOString();
+    }
+    try{ await persistParte(p); }catch(e){ console.error(e); }
+    await copiarTexto(parteToText(p));
+    closeOverlay(); renderGuardia();
+  });
+}
+
+function openParteView(id){
+  const p=state.partes.find(x=>x.id===id); if(!p){ toast('No se encontró el parte','err'); return; }
+  const txt=parteToText(p);
+  const puedeEliminar = currentRole==='admin' || (currentUser&&currentUser.legajo && currentUser.legajo===p.autorLp);
+  openOverlay(`
+    <div class="mhead">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+      <div><h3>Parte — ${esc(edificioLabel(p.edificio))} · ${esc(p.tipo==='CIERRE'?'Cierre':'Inicio')}</h3><p>${esc(fmtFechaDash(p.fecha))}${p.autorNombre?(' · registró '+esc(p.autorNombre)):''}</p></div>
+      <button class="x" data-close>×</button>
+    </div>
+    <div class="mbody">
+      <pre style="white-space:pre-wrap;word-break:break-word;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:14px 16px;font-size:13px;margin:0;font-family:inherit">${esc(txt)}</pre>
+    </div>
+    <div class="mfoot">
+      ${puedeEliminar?'<button class="btn danger" id="btnParteDel" style="margin-right:auto">Eliminar</button>':''}
+      <button class="btn ghost" data-close>Cerrar</button>
+      <button class="btn ghost" id="btnParteEdit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" stroke-linecap="round" stroke-linejoin="round"/></svg>Editar</button>
+      <button class="btn" id="btnParteViewCopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copiar para WhatsApp</button>
+    </div>
+  `, true);
+  $('#btnParteViewCopy').addEventListener('click',()=>copiarTexto(txt));
+  $('#btnParteEdit').addEventListener('click',()=>{ closeOverlay(); openParteForm(id); });
+  const bd=$('#btnParteDel'); if(bd) bd.addEventListener('click',()=>confirmDelParte(id));
+}
+
+function confirmDelParte(id){
+  const p=state.partes.find(x=>x.id===id); if(!p) return;
+  openOverlay(`<div class="mhead"><div class="ic" style="color:var(--bad)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><h3>Eliminar parte</h3><p>${esc(edificioLabel(p.edificio))} · ${esc(fmtFechaDash(p.fecha))}</p></div><button class="x" data-close>×</button></div>
+  <div class="mbody"><p>Se eliminará este parte del historial. Esta acción no se puede deshacer.</p></div>
+  <div class="mfoot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" id="okDelParte">Eliminar</button></div>`);
+  $('#okDelParte').onclick=async()=>{ await removeParte(id); closeOverlay(); renderGuardia(); toast('Parte eliminado'); };
+}
+
+function exportGuardia(){
+  try{
+    let list=[...state.partes].sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''));
+    if(guardiaFilters.edificio) list=list.filter(p=>p.edificio===guardiaFilters.edificio);
+    if(guardiaFilters.tipo) list=list.filter(p=>p.tipo===guardiaFilters.tipo);
+    if(guardiaFilters.fecha) list=list.filter(p=>p.fecha===guardiaFilters.fecha);
+    if(!list.length){ toast('No hay partes para exportar','err'); return; }
+    const rows=list.map(p=>({
+      Fecha:fmtFechaDash(p.fecha), Edificio:edificioLabel(p.edificio), Tipo:(p.tipo==='CIERRE'?'Cierre':'Inicio'),
+      'Oficial de Dirección':p.oficialDireccion||'', 'Jefe de servicio':p.jefeServicio||'', 'Administración':p.administracion||'',
+      'Infante de guardia':p.infante||'', Horario:p.horario||'',
+      Novedades:(p.novedades||[]).map((n,i)=>(i+1)+'. '+n).join('\n'),
+      'Registró':p.autorNombre||''
+    }));
+    const ws=XLSX.utils.json_to_sheet(rows);
+    ws['!cols']=[{wch:12},{wch:16},{wch:8},{wch:26},{wch:24},{wch:22},{wch:24},{wch:22},{wch:60},{wch:24}];
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Guardia edilicia');
+    XLSX.writeFile(wb,'Guardia_edilicia_partes.xlsx');
+    toast('Excel exportado');
+  }catch(e){ console.error(e); toast('No se pudo exportar','err'); }
+}
+
+/* ---------- Eventos de guardia ---------- */
+$('#btnNuevoParte')?.addEventListener('click',()=>openParteForm(null));
+$('#searchGuardia')?.addEventListener('input',e=>{ guardiaFilters.q=e.target.value; renderGuardia(); });
+$('#filterGuEdificio')?.addEventListener('change',e=>{ guardiaFilters.edificio=e.target.value; renderGuardia(); });
+$('#filterGuTipo')?.addEventListener('change',e=>{ guardiaFilters.tipo=e.target.value; renderGuardia(); });
+$('#filterGuFecha')?.addEventListener('change',e=>{ guardiaFilters.fecha=e.target.value; renderGuardia(); });
+$('#btnExportGuardia')?.addEventListener('click',exportGuardia);
+document.body.addEventListener('click',e=>{
+  const t=e.target;
+  const v=t.closest('[data-verparte]'); if(v){ openParteView(v.dataset.verparte); return; }
+  const c=t.closest('[data-copyparte]'); if(c){ const p=state.partes.find(x=>x.id===c.dataset.copyparte); if(p) copiarTexto(parteToText(p)); return; }
+  const ed=t.closest('[data-editparte]'); if(ed){ openParteForm(ed.dataset.editparte); return; }
+  const dl=t.closest('[data-delparte]'); if(dl){ confirmDelParte(dl.dataset.delparte); return; }
+});
+
 /* -------------------- Toast -------------------- */
 let toastT;
 function toast(msg,type){
@@ -1360,6 +1729,117 @@ function toast(msg,type){
     : '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6L9 17l-5-5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),2600);
 }
+
+/* ==================================================================
+   CLAVES DE ACCESO (PIN) — cambio propio y gestión de administrador
+   ================================================================== */
+function pinValido(p){ return /^\S{3,10}$/.test(p||''); }
+
+// Cambiar la propia clave (cualquier usuario logueado)
+function openCambiarMiPin(){
+  if(!currentUser || !currentUser.legajo){ toast('Iniciá sesión para cambiar tu clave','err'); return; }
+  const lp=currentUser.legajo;
+  openOverlay(`
+    <div class="mhead">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg></div>
+      <div><h3>Cambiar mi clave</h3><p>Legajo ${esc(lp)} · elegí una clave fácil de recordar (3 a 10 caracteres)</p></div>
+      <button class="x" data-close>×</button>
+    </div>
+    <div class="mbody">
+      <div class="formgrid">
+        <label class="fld full">Clave actual<input id="mp_actual" type="password" autocomplete="off" placeholder="Tu clave de ahora"></label>
+        <label class="fld">Nueva clave<input id="mp_nueva" type="password" autocomplete="off" placeholder="Nueva clave"></label>
+        <label class="fld">Repetir nueva clave<input id="mp_rep" type="password" autocomplete="off" placeholder="Repetir"></label>
+      </div>
+      <p class="hint" id="mp_err" style="color:var(--bad);min-height:16px"></p>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" data-close>Cancelar</button>
+      <button class="btn" id="mp_ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" stroke-linecap="round"/></svg>Guardar clave</button>
+    </div>
+  `);
+  const err=$('#mp_err');
+  $('#mp_ok').addEventListener('click',async()=>{
+    const act=($('#mp_actual').value||'').trim(), nue=($('#mp_nueva').value||'').trim(), rep=($('#mp_rep').value||'').trim();
+    if(act!==pinDe(lp)){ err.textContent='La clave actual no es correcta.'; return; }
+    if(!pinValido(nue)){ err.textContent='La nueva clave debe tener entre 3 y 10 caracteres, sin espacios.'; return; }
+    if(nue!==rep){ err.textContent='Las claves nuevas no coinciden.'; return; }
+    if(nue===act){ err.textContent='La nueva clave es igual a la actual.'; return; }
+    try{ await setPin(lp,nue); }catch(e){ console.error(e); }
+    closeOverlay(); toast('Clave actualizada');
+  });
+  setTimeout(()=>{ const el=$('#mp_actual'); if(el) el.focus(); },60);
+}
+
+// Panel de administrador: lista de usuarios con su estado de clave
+function renderGestionPines(){
+  const host=$('#gestionPines'); if(!host) return;
+  const filas=Object.keys(CREDENTIALS).map(lp=>({lp,nombre:CREDENTIALS[lp].nombre||'',role:CREDENTIALS[lp].role}))
+    .sort((a,b)=> (a.role===b.role? a.nombre.localeCompare(b.nombre) : (a.role==='admin'?-1:1)) );
+  host.innerHTML=`<div class="tablewrap"><div class="tscroll"><table style="min-width:520px">
+    <thead><tr><th>Legajo</th><th>Usuario</th><th>Clave</th><th></th></tr></thead>
+    <tbody>${filas.map(f=>{
+      const custom=tienePinCustom(f.lp);
+      return `<tr>
+        <td><span class="lp">${esc(f.lp)}</span></td>
+        <td><div class="nm">${esc(f.nombre||'—')}</div><small>${f.role==='admin'?'Administrador':'Operativo'}</small></td>
+        <td><span class="badge ${custom?'b-ok':'b-na'}"><span class="pip"></span>${custom?'Personalizada':'Por defecto'}</span></td>
+        <td><div class="rowactions">
+          <button class="btn ghost sm" data-setpin="${esc(f.lp)}">Asignar clave</button>
+          ${custom?`<button class="btn danger sm" data-resetpin="${esc(f.lp)}">Restaurar original</button>`:''}
+        </div></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div></div>`;
+}
+
+// Administrador asigna una clave nueva a un usuario que la olvidó
+function openSetPinAdmin(lp){
+  const cred=CREDENTIALS[lp]; if(!cred){ toast('Legajo no encontrado','err'); return; }
+  openOverlay(`
+    <div class="mhead">
+      <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg></div>
+      <div><h3>Asignar clave</h3><p>${esc(cred.nombre||'')} · Legajo ${esc(lp)}</p></div>
+      <button class="x" data-close>×</button>
+    </div>
+    <div class="mbody">
+      <div class="formgrid">
+        <label class="fld">Nueva clave<input id="ap_nueva" type="text" autocomplete="off" placeholder="Ej: 1234"></label>
+        <label class="fld">Repetir clave<input id="ap_rep" type="text" autocomplete="off" placeholder="Repetir"></label>
+      </div>
+      <p class="hint">El usuario podrá cambiarla luego desde <b>🔑 Mi clave</b>. Entre 3 y 10 caracteres, sin espacios.</p>
+      <p class="hint" id="ap_err" style="color:var(--bad);min-height:16px"></p>
+    </div>
+    <div class="mfoot">
+      <button class="btn ghost" data-close>Cancelar</button>
+      <button class="btn" id="ap_ok">Asignar clave</button>
+    </div>
+  `);
+  const err=$('#ap_err');
+  $('#ap_ok').addEventListener('click',async()=>{
+    const nue=($('#ap_nueva').value||'').trim(), rep=($('#ap_rep').value||'').trim();
+    if(!pinValido(nue)){ err.textContent='La clave debe tener entre 3 y 10 caracteres, sin espacios.'; return; }
+    if(nue!==rep){ err.textContent='Las claves no coinciden.'; return; }
+    try{ await setPin(lp,nue); }catch(e){ console.error(e); }
+    closeOverlay(); renderGestionPines(); toast('Clave asignada al legajo '+lp);
+  });
+  setTimeout(()=>{ const el=$('#ap_nueva'); if(el) el.focus(); },60);
+}
+
+function confirmResetPin(lp){
+  const cred=CREDENTIALS[lp]; if(!cred) return;
+  openOverlay(`<div class="mhead"><div class="ic" style="color:var(--warn)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 3v5h5" stroke-linecap="round" stroke-linejoin="round"/></svg></div><div><h3>Restaurar clave original</h3><p>${esc(cred.nombre||'')} · Legajo ${esc(lp)}</p></div><button class="x" data-close>×</button></div>
+  <div class="mbody"><p>Se eliminará la clave personalizada y el usuario volverá a ingresar con su <b>clave original de fábrica</b>. ¿Continuar?</p></div>
+  <div class="mfoot"><button class="btn ghost" data-close>Cancelar</button><button class="btn danger" id="okResetPin">Restaurar</button></div>`);
+  $('#okResetPin').onclick=async()=>{ await resetPin(lp); closeOverlay(); renderGestionPines(); toast('Clave restaurada a la de fábrica'); };
+}
+
+// Delegación de clicks del panel de claves
+document.body.addEventListener('click',e=>{
+  const t=e.target;
+  const s=t.closest('[data-setpin]'); if(s){ openSetPinAdmin(s.dataset.setpin); return; }
+  const r=t.closest('[data-resetpin]'); if(r){ confirmResetPin(r.dataset.resetpin); return; }
+});
 
 /* -------------------- Login -------------------- */
 const AUTH_KEY='aryl_auth';
@@ -1390,6 +1870,7 @@ let currentRole='user', currentUser=null;
 function applyUser(u){
   currentRole=u.role; currentUser=u;
   document.body.classList.toggle('is-admin', u.role==='admin');
+  if(u.role==='admin' && typeof renderGestionPines==='function'){ try{ renderGestionPines(); }catch(e){} }
   const b=document.getElementById('roleBadge');
   if(b){
     const ape=(u.nombre||'').split(',')[0].trim();
@@ -1409,7 +1890,7 @@ function tryLogin(){
   const err=document.getElementById('loginErr');
   if(!legajo||!pin){ err.textContent='Ingresá tu legajo y tu clave.'; return; }
   const cred=CREDENTIALS[legajo];
-  if(cred && pin===cred.pin){
+  if(cred && pin===pinDe(legajo)){
     const u={ legajo, role:cred.role, nombre:cred.nombre||'', super:!!cred.super };
     try{ sessionStorage.setItem(AUTH_KEY,JSON.stringify(u)); }catch(e){}
     err.textContent=''; showApp(u);
@@ -1419,6 +1900,7 @@ function tryLogin(){
   }
 }
 function initAuth(){
+  loadPinsLocal(); // claves personalizadas disponibles para el login aun sin conexión
   let u=null; try{ u=JSON.parse(sessionStorage.getItem(AUTH_KEY)||'null'); }catch(e){}
   if(u && u.legajo && CREDENTIALS[u.legajo]){ const c=CREDENTIALS[u.legajo]; u.role=c.role; u.nombre=c.nombre||u.nombre; u.super=!!c.super; showApp(u); }
   else showLogin();
@@ -1427,6 +1909,7 @@ function initAuth(){
   document.getElementById('loginPass').addEventListener('keydown',e=>{ if(e.key==='Enter') tryLogin(); });
   document.getElementById('btnLogout').addEventListener('click',()=>{ try{ sessionStorage.removeItem(AUTH_KEY); }catch(e){} showLogin(); });
   { const bm=document.getElementById('btnManual'); if(bm) bm.addEventListener('click',()=>{ if(window.descargarManualRevista) window.descargarManualRevista(); }); }
+  { const bp=document.getElementById('btnMiPin'); if(bp) bp.addEventListener('click',openCambiarMiPin); }
 }
 initAuth();
 
